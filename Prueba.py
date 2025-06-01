@@ -54,7 +54,7 @@ def get_stock_value_on_date(ticker_key, date=None):
 
 
 
-# Ejemplo:  bucle de días desde el 1 de enero de 2024 hasta hoy
+# Ejemplo:   bucle de días desde el 1 de enero de 2024 hasta hoy
 start_loop = pd.Timestamp('2024-01-01')
 end_loop = pd.Timestamp.now()
 results = []
