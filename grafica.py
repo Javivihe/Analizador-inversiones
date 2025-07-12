@@ -4,7 +4,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import ta
 
-def plot_stock_and_return(ticker, start_date, end_date=None, grafica=False):
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
+
+
+def plot_stock_and_return(flag, ticker, start_date, end_date=None, grafica=False):
     if end_date is None:
         end_date = pd.Timestamp.now()
     stock = yf.Ticker(ticker)
@@ -45,25 +50,47 @@ def plot_stock_and_return(ticker, start_date, end_date=None, grafica=False):
 
     df.dropna(inplace=True)
 
-    df['signal_sma'] = 0
-    df.loc[df['SMA_5'] > df['SMA_20'], 'signal_sma'] = 1
-    df.loc[df['SMA_5'] < df['SMA_20'], 'signal_sma'] = -1
+    if flag == 'analisis_basico':
 
-    df['signal_rsi'] = 0
-    df.loc[df['RSI'] < 30, 'signal_rsi'] = 1
-    df.loc[df['RSI'] > 70, 'signal_rsi'] = -1
+        df['signal_sma'] = 0
+        df.loc[df['SMA_5'] > df['SMA_20'], 'signal_sma'] = 1
+        df.loc[df['SMA_5'] < df['SMA_20'], 'signal_sma'] = -1
 
-    df['signal_macd'] = 0
-    df.loc[df['MACD'] > df['MACD_signal'], 'signal_macd'] = 1
-    df.loc[df['MACD'] < df['MACD_signal'], 'signal_macd'] = -1
+        df['signal_rsi'] = 0
+        df.loc[df['RSI'] < 30, 'signal_rsi'] = 1
+        df.loc[df['RSI'] > 70, 'signal_rsi'] = -1
 
-    df['signal_total'] = df['signal_sma'] + df['signal_rsi'] + df['signal_macd']
+        df['signal_macd'] = 0
+        df.loc[df['MACD'] > df['MACD_signal'], 'signal_macd'] = 1
+        df.loc[df['MACD'] < df['MACD_signal'], 'signal_macd'] = -1
 
-    # Señal final:
-    df['final_signal'] = 0
-    df.loc[df['signal_total'] >= 2, 'final_signal'] = 1
-    df.loc[df['signal_total'] <= -2, 'final_signal'] = -1
+        df['signal_total'] = df['signal_sma'] + df['signal_rsi'] + df['signal_macd']
 
+        # Señal final:
+        df['resultado_final'] = 0
+        df.loc[df['signal_total'] >= 2, 'resultado_final'] = 1
+        df.loc[df['signal_total'] <= -2, 'resultado_final'] = -1
+
+    elif flag == 'random_forest':
+        # MACHINE LEARNING
+
+        df['target'] = (df['close'].shift(-1) > df['close']).astype(int)
+        features = ['SMA_5', 'SMA_10', 'SMA_20', 'RSI', 'MACD', 'MACD_signal', 'volatility_5', 'volatility_10', 'retorno']
+        X = df[features]
+        y = df['target']
+
+        # Dividir en entrenamiento y test
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+
+        # Entrenar
+        model = RandomForestClassifier()
+        model.fit(X_train, y_train)
+
+        # Evaluar
+        y_pred = model.predict(X_test)
+        print(classification_report(y_test, y_pred))
+        df['prediction'] = model.predict(X)
+        df['resultado_final'] = df['prediction'].replace({1: 1, 0: -1})  # 1 = compra, -1 = venta
 
     if grafica == True:
         fig, axs = plt.subplots(3, 1, figsize=(14, 16), sharex=True)
@@ -71,8 +98,8 @@ def plot_stock_and_return(ticker, start_date, end_date=None, grafica=False):
         axs[0].plot(df['close'], label='Precio de Cierre', color='blue')
         axs[0].plot(df['SMA_5'], label='SMA 5', alpha=0.6)
         axs[0].plot(df['SMA_20'], label='SMA 20', alpha=0.6)
-        buy_signals = df[df['final_signal'] == 1]
-        sell_signals = df[df['final_signal'] == -1]
+        buy_signals = df[df['resultado_final'] == 1]
+        sell_signals = df[df['resultado_final'] == -1]
         axs[0].scatter(buy_signals.index, buy_signals['close'], label='Compra', marker='^', color='green', s=100)
         axs[0].scatter(sell_signals.index, sell_signals['close'], label='Venta', marker='v', color='red', s=100)
         axs[0].set_title("Precio de cierre, SMA y señales de compra/venta")
@@ -115,7 +142,7 @@ def backtest_strategy(df):
     df['trade'] = ''  # Registro de operación
 
     for i in range(len(df)):
-        signal = df.iloc[i]['final_signal']
+        signal = df.iloc[i]['resultado_final']
         close_price = df.iloc[i]['close']
 
         if signal == 1 and not in_market:
@@ -145,16 +172,44 @@ def backtest_strategy(df):
 
     # Resultado final
     final_value = cash
-    roi = (final_value - initial_cash) / initial_cash * 100
+    final_value_roi = (final_value - initial_cash) / initial_cash * 100
 
     # Para comparar: estrategia pasiva de mantener
     buy_hold_return = (df['close'].iloc[-1] - df['close'].iloc[0]) / df['close'].iloc[0] * 100
 
-    print(f"Resultado de estrategia: {final_value:.2f}€ (ROI: {roi:.2f}%)")
-    print(f"Estrategia de mantener: ROI = {buy_hold_return:.2f}%")
+   
+
+    return final_value_roi, buy_hold_return
 
 
-# Ejemplo de uso:
+def estrategia(TICKERS, flags):
+
+
+    for flag in flags:
+        
+        cont_estrategia = 0
+        cont_total = 0
+
+        print(f"Evaluando estrategia con flag: {flag}")
+
+        for i in TICKERS:
+            
+            print(f"Procesando {i}...")
+
+            df = plot_stock_and_return(flag, i, '2025-01-01', grafica=True)
+            final_value_roi, buy_hold_return = backtest_strategy(df)
+
+            print(f"Resultado de estrategia: ROI = {final_value_roi:.2f}%)")
+            print(f"Estrategia de mantener: ROI = {buy_hold_return:.2f}%")
+
+            if (final_value_roi > buy_hold_return):
+
+                cont_estrategia = cont_estrategia + 1
+            cont_total = cont_total + 1
+
+        print(f"Total de acciones analizadas: {cont_total}")
+        print(f"Acciones con mejor ROI que estrategia de mantener: {cont_estrategia}")
+        print("--------------------------------------------------\n")
 
 
 TICKERS = [
@@ -170,7 +225,8 @@ TICKERS = [
     "AZN", "HSBC"
 ]
 
+TICKERS_RED = [
+    "NVDA", "AAPL", "TSLA"
+]
 
-df = plot_stock_and_return('CAH', '2024-01-01', grafica=False)
-
-backtest_strategy(df)
+estrategia(TICKERS_RED, ['random_forest'])
