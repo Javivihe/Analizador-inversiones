@@ -26,4 +26,4 @@ TICKERS_RED = [
     "NVDA", "AAPL", "TSLA"
 ]
 
-estrategia(TICKERS_RED, ['lstm'])
+estrategia(TICKERS_RED, ['analisis_lstm_multiclase'])

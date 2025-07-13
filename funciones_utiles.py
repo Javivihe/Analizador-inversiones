@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import ta
 
-from funciones_analisis import analisis_basico, analisis_random_forest, analisis_lstm
+from funciones_analisis import analisis_basico, analisis_random_forest, analisis_lstm, analisis_lstm_multiclase
 
 def plot_stock_and_return(flag, ticker, start_date, end_date=None, grafica=False):
     if end_date is None:
@@ -24,6 +24,7 @@ def plot_stock_and_return(flag, ticker, start_date, end_date=None, grafica=False
         'retorno': (stock_data['Close'] - stock_data['Open']) / stock_data['Open'],
         'high': stock_data['High'].values,
         'low': stock_data['Low'].values,
+        'volume': stock_data['Volume'].values,
         # Medias Móviles (SMA)
         'SMA_5':  stock_data['Close'].rolling(window=5).mean(),
         'SMA_10':  stock_data['Close'].rolling(window=10).mean(),
@@ -48,6 +49,8 @@ def plot_stock_and_return(flag, ticker, start_date, end_date=None, grafica=False
         df = analisis_random_forest(df)
     elif flag == 'lstm':
         df = analisis_lstm(df)
+    elif flag == 'analisis_lstm_multiclase':
+        df = analisis_lstm_multiclase(df)
 
     if grafica:
         plot_signals(df, ticker)
@@ -66,8 +69,10 @@ def plot_signals(df, ticker):
     axs[0].plot(df['SMA_5'], label='SMA 5', alpha=0.6)
     axs[0].plot(df['SMA_20'], label='SMA 20', alpha=0.6)
     buy_signals = df[df['resultado_final'] == 1]
+    neutral_signals = df[df['resultado_final'] == 0]
     sell_signals = df[df['resultado_final'] == -1]
     axs[0].scatter(buy_signals.index, buy_signals['close'], label='Compra', marker='^', color='green', s=100)
+    axs[0].scatter(neutral_signals.index, neutral_signals['close'], label='Nada', marker='o', color='blue', s=100)
     axs[0].scatter(sell_signals.index, sell_signals['close'], label='Venta', marker='v', color='red', s=100)
     axs[0].set_title("Precio de cierre, SMA y señales de compra/venta")
     axs[0].legend()
@@ -153,7 +158,7 @@ def estrategia(TICKERS, flags):
         print(f"Evaluando estrategia con flag: {flag}")
         for i in TICKERS:
             print(f"Procesando {i}...")
-            df = plot_stock_and_return(flag, i, '2025-01-01', grafica=True)
+            df = plot_stock_and_return(flag, i, '2020-01-01', grafica=True)
             final_value_roi, buy_hold_return = backtest_strategy(df)
             print(f"Resultado de estrategia: ROI = {final_value_roi:.2f}%)")
             print(f"Estrategia de mantener: ROI = {buy_hold_return:.2f}%")
