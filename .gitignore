@@ -1,0 +1,36 @@
+# Ignore Python cache and environment files
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.env
+*.venv
+.env
+.venv
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore keras tuner output (but NOT model output)
+tuner_dir/**/checkpoint*
+tuner_dir/**/trial_*/
+tuner_dir/**/oracle.json
+tuner_dir/**/tuner*.json
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore VS Code settings
+.vscode/
+
+# Ignore logs
+*.log
+
+# Ignore temporary files
+*.tmp
+*.bak
+~$*
+
+# Do NOT ignore model output files
+!tuner_dir/**/model*
