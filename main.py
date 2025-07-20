@@ -23,8 +23,7 @@ TICKERS = [
 ]
 
 TICKERS_RED = [
-    "NVDA", "AAPL", "TSLA", "MSFT", "AMZN", "VOO", "VOO", "GOOGL", "META", "KO",
-    "RR.L", "O", "AMD", "PLTR", "MCD", "IBM", "JPM", "JNJ", "VEU", "PEP", "SBUX"
+    "NVDA", "AAPL", "TSLA", "MSFT", "AMZN", "VOO"
 ]
 
 estrategia(TICKERS_RED, ['analisis_xgb_multiclase'], '2020-01-01', False)

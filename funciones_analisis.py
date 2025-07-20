@@ -71,7 +71,7 @@ def analisis_lstm(df):
     from tensorflow.keras.callbacks import EarlyStopping
 
     # === 1. Crear target: predicción de subida en 3 días con 0.5% de umbral ===
-    n_days = 3
+    n_days = 5
     threshold = 0.003
     future_return = df['close'].shift(-n_days) / df['close'] - 1
 
@@ -367,13 +367,47 @@ def analisis_xgb_multiclase(df):
     # 3. Lista de features
     # ------------------------------------------------------------------
     features = [
-        # Indicadores que deberías haber calculado previamente:
+        # Medias Móviles Simples (SMA)
         'SMA_5', 'SMA_10', 'SMA_20',
-        'RSI', 'MACD', 'MACD_signal',
-        'volatility_5', 'volatility_10', 'retorno',
-        # Nuevas variables:
-        'daily_return', 'volume_change',
-        'price_diff', 'rolling_max', 'rolling_min'
+        
+        # Medias Móviles Exponenciales (EMA)
+        'EMA_5', 'EMA_10', 'EMA_20',
+        
+        # Indicadores de momentum y tendencia
+        'RSI',
+        'MACD', 'MACD_signal',
+        'momentum_5', 'momentum_10',
+        'stoch_k', 'stoch_d',
+        'ADX_14',
+        'CCI_20',
+        
+        # Indicadores de volatilidad
+        'volatility_5', 'volatility_10',
+        'ATR_14',
+        'bb_bbm', 'bb_bbh', 'bb_bbl', 'bb_bandwidth',
+        
+        # Retornos y variaciones
+        'retorno',
+        'daily_return',
+        'price_diff',
+        'gap',
+        
+        # Volumen
+        'volume',
+        'volume_change',
+        'OBV',
+        
+        # Precios extremos y rangos
+        'rolling_max_10', 'rolling_min_10',
+        
+        # VIX como indicador externo
+        'vix_close', 'vix_change_1d',
+        
+        # Características temporales
+        'day_of_week', 'month', 'quarter',
+        
+        # Otros
+        'up_down'
     ]
 
     df = df.dropna(subset=features + ['target'])  # fuera nulos
