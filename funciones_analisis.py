@@ -204,7 +204,7 @@ def analisis_lstm_multiclase(df):
 
     # === 1. Crear target multiclase: -1 (vender), 0 (nada), 1 (comprar) ===
     n_days = 3
-    threshold = 0.003
+    threshold = 0.05
     future_return = df['close'].shift(-n_days) / df['close'] - 1
 
     df['target'] = np.where(
@@ -247,7 +247,7 @@ def analisis_lstm_multiclase(df):
             y_seq.append(y[i])
         return np.array(X_seq), np.array(y_seq)
 
-    window_size = 5
+    window_size = 20
     global X_train
     X_seq, y_seq = create_sequences(X_scaled, y_encoded, window_size=window_size)
 
@@ -315,5 +315,124 @@ def analisis_lstm_multiclase(df):
     df_result = df.iloc[window_size + split:].copy()
     df_result['prediction'] = clases[y_pred_labels]
     df_result['resultado_final'] = df_result['prediction']  # ya es -1, 0 o 1
+
+    return df_result
+
+
+def analisis_xgb_multiclase(df):
+    """
+    Entrena un XGBoostClassifier para predecir señales -1/0/1 a partir de indicadores técnicos
+    y devuelve un DataFrame con las predicciones sobre la partición de test.
+
+    Parámetros
+    ----------
+    df : pd.DataFrame
+        Debe contener al menos ['close', 'high', 'low', 'volume'] y los indicadores técnicos
+        mencionados en `features`. Si no los tienes, añádelos antes de llamar a la función.
+
+    Devuelve
+    --------
+    df_result : pd.DataFrame
+        Filas del conjunto de test con la predicción (`prediction`) y la columna `resultado_final`
+        (‑1, 0 o 1).
+    """
+    # ------------------------------------------------------------------
+    # 1. Crear la etiqueta multiclase
+    # ------------------------------------------------------------------
+    import numpy as np
+    import pandas as pd
+    from sklearn.metrics import classification_report, confusion_matrix
+    from sklearn.utils.class_weight import compute_class_weight
+    from xgboost import XGBClassifier
+
+    n_days = 3
+    threshold = 0.003
+    future_return = df['close'].shift(-n_days) / df['close'] - 1
+
+    df['target'] = np.where(
+        future_return > threshold,  1,
+        np.where(future_return < -threshold, -1, 0)
+    )
+
+    # ------------------------------------------------------------------
+    # 2. Variables adicionales (si aún no las tienes en tu DataFrame)
+    # ------------------------------------------------------------------
+    df['daily_return']  = df['close'].pct_change()
+    df['volume_change'] = df['volume'].pct_change()
+    df['price_diff']    = df['high'] - df['low']
+    df['rolling_max']   = df['close'].rolling(5).max()
+    df['rolling_min']   = df['close'].rolling(5).min()
+
+    # ------------------------------------------------------------------
+    # 3. Lista de features
+    # ------------------------------------------------------------------
+    features = [
+        # Indicadores que deberías haber calculado previamente:
+        'SMA_5', 'SMA_10', 'SMA_20',
+        'RSI', 'MACD', 'MACD_signal',
+        'volatility_5', 'volatility_10', 'retorno',
+        # Nuevas variables:
+        'daily_return', 'volume_change',
+        'price_diff', 'rolling_max', 'rolling_min'
+    ]
+
+    df = df.dropna(subset=features + ['target'])  # fuera nulos
+
+    # ------------------------------------------------------------------
+    # 4. Preparar X, y y división temporal 80 / 20
+    # ------------------------------------------------------------------
+    X = df[features].values
+
+    # Mapear (-1,0,1) → (0,1,2) porque XGBoost requiere enteros consecutivos desde 0
+    label_map = {-1: 0, 0: 1, 1: 2}
+    y = df['target'].map(label_map).values
+
+    split_idx = int(len(df) * 0.8)
+    X_train, X_test = X[:split_idx], X[split_idx:]
+    y_train, y_test = y[:split_idx], y[split_idx:]
+
+    # ------------------------------------------------------------------
+    # 5. Compensar el desbalance de clases con pesos por muestra
+    # ------------------------------------------------------------------
+    class_weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
+    cw_dict = {cls: w for cls, w in zip(np.unique(y_train), class_weights)}
+    sample_weight_train = np.vectorize(cw_dict.get)(y_train)
+
+    # ------------------------------------------------------------------
+    # 6. Definir y entrenar el modelo
+    #    (hiperparámetros razonables; ajusta si quieres con Grid/Random Search)
+    # ------------------------------------------------------------------
+    model = XGBClassifier(
+        n_estimators=200,
+        learning_rate=0.1,
+        max_depth=4,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        objective='multi:softprob',   # salida de probabilidades
+        num_class=3,
+        eval_metric='mlogloss',
+        random_state=42,
+        verbosity=0
+    )
+
+    model.fit(X_train, y_train, sample_weight=sample_weight_train)
+
+    # ------------------------------------------------------------------
+    # 7. Evaluación clásica + reporte
+    # ------------------------------------------------------------------
+    y_pred = model.predict(X_test)
+    inv_label_map = {v: k for k, v in label_map.items()}
+
+    print("\n📊 Clasificación en test:")
+    print(classification_report(y_test,
+                                y_pred,
+                                target_names=['Vender (-1)', 'Nada (0)', 'Comprar (1)']))
+
+    # ------------------------------------------------------------------
+    # 8. Reconstruir DataFrame con resultados
+    # ------------------------------------------------------------------
+    df_result = df.iloc[split_idx:].copy()
+    df_result['prediction']     = [inv_label_map[i] for i in y_pred]
+    df_result['resultado_final'] = df_result['prediction']   # por si acaso
 
     return df_result

@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import ta
 
-from funciones_analisis import analisis_basico, analisis_random_forest, analisis_lstm, analisis_lstm_multiclase
+from funciones_analisis import analisis_basico, analisis_random_forest, analisis_lstm, analisis_lstm_multiclase, analisis_xgb_multiclase
 
 def plot_stock_and_return(flag, ticker, start_date, end_date=None, grafica=False):
     if end_date is None:
@@ -51,6 +51,8 @@ def plot_stock_and_return(flag, ticker, start_date, end_date=None, grafica=False
         df = analisis_lstm(df)
     elif flag == 'analisis_lstm_multiclase':
         df = analisis_lstm_multiclase(df)
+    elif flag == 'analisis_xgb_multiclase':
+        df = analisis_xgb_multiclase(df)
 
     if grafica:
         plot_signals(df, ticker)
@@ -145,21 +147,25 @@ def backtest_strategy(df):
     return final_value_roi, buy_hold_return
 
 
-def estrategia(TICKERS, flags):
+def estrategia(TICKERS, flags, init_day, param_grafica):
     """
     Ejecuta la estrategia para una lista de tickers y flags.
     Args:
         TICKERS (list): Lista de símbolos.
         flags (list): Lista de flags de estrategia.
     """
+    arr_estrategia = []
+    arr_mantener = []
     for flag in flags:
         cont_estrategia = 0
         cont_total = 0
         print(f"Evaluando estrategia con flag: {flag}")
         for i in TICKERS:
             print(f"Procesando {i}...")
-            df = plot_stock_and_return(flag, i, '2020-01-01', grafica=True)
+            df = plot_stock_and_return(flag, i, init_day, grafica=param_grafica)
             final_value_roi, buy_hold_return = backtest_strategy(df)
+            arr_estrategia.append(final_value_roi)
+            arr_mantener.append(buy_hold_return)
             print(f"Resultado de estrategia: ROI = {final_value_roi:.2f}%)")
             print(f"Estrategia de mantener: ROI = {buy_hold_return:.2f}%")
             if (final_value_roi > buy_hold_return):
@@ -168,3 +174,6 @@ def estrategia(TICKERS, flags):
         print(f"Total de acciones analizadas: {cont_total}")
         print(f"Acciones con mejor ROI que estrategia de mantener: {cont_estrategia}")
         print("--------------------------------------------------\n")
+        print("Resultados finales:")
+        print(f"ROI estrategia: {np.mean(arr_estrategia):.2f}%")
+        print(f"ROI estrategia de mantener: {np.mean(arr_mantener):.2f}%")      
