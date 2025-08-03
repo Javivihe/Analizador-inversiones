@@ -11,7 +11,11 @@ import keras_tuner as kt
 from tensorflow.keras.callbacks import EarlyStopping
 import matplotlib.pyplot as plt
 import seaborn as sns
-
+from transformar_datos import transformar_datos
+from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
+from sklearn.metrics import classification_report
+from sklearn.utils.class_weight import compute_class_weight
+import keras_tuner as kt
 
 def analisis_basico(df):
     """
@@ -25,15 +29,11 @@ def analisis_basico(df):
     return df
 
 
-def analisis_random_forest(df):
+def analisis_random_forest(df, features):
     """
     Aplica el análisis de Random Forest y genera la columna resultado_final.
     """
-    threshold = 0.001
-    df['target'] = np.where((df['close'].shift(-1) / df['close'] - 1) > threshold, 1,
-                            np.where((df['close'].shift(-1) / df['close'] - 1) < -threshold, -1, 0))
-    df.dropna(inplace=True)
-    df = df[df['target'] != 0]
+
     features = ['SMA_5', 'SMA_10', 'SMA_20', 'RSI', 'MACD', 'MACD_signal', 'volatility_5', 'volatility_10', 'retorno']
     X = df[features]
     y = df['target'].replace({-1: 0})
@@ -56,144 +56,7 @@ def analisis_random_forest(df):
     df['resultado_final'] = df['prediction'].replace({1: 1, 0: -1})
     return df
 
-
-def analisis_lstm(df):
-    """
-    Aplica el análisis LSTM mejorado con horizonte de predicción ajustado y nuevas features.
-    """
-
-    import numpy as np
-    import pandas as pd
-    from sklearn.preprocessing import MinMaxScaler
-    from sklearn.metrics import classification_report
-    from sklearn.utils.class_weight import compute_class_weight
-    import keras_tuner as kt
-    from tensorflow.keras.models import Sequential
-    from tensorflow.keras.layers import LSTM, Dropout, Dense
-    from tensorflow.keras.optimizers import Adam
-    from tensorflow.keras.callbacks import EarlyStopping
-
-    # === 1. Crear target: predicción de subida en 3 días con 0.5% de umbral ===
-    n_days = 5
-    threshold = 0.003
-    future_return = df['close'].shift(-n_days) / df['close'] - 1
-
-    # === Crear máscara: solo subidas o bajadas relevantes (filtramos neutros) ===
-    mask = (future_return > threshold) | (future_return < -threshold)
-    df = df[mask].copy()
-
-    # === Crear target binario: 1 = comprar, 0 = vender ===
-    df['target'] = np.where(future_return > threshold, 1, 0)
-
-    # === 2. Agregar nuevas variables ===
-    df['daily_return'] = df['close'].pct_change()
-    df['volume_change'] = df['volume'].pct_change()
-    df['price_diff'] = df['high'] - df['low']
-    df['rolling_max'] = df['close'].rolling(5).max()
-    df['rolling_min'] = df['close'].rolling(5).min()
-
-    # === 3. Lista de features ===
-    features = [
-        'SMA_5', 'SMA_10', 'SMA_20',
-        'RSI', 'MACD', 'MACD_signal',
-        'volatility_5', 'volatility_10',
-        'retorno',
-        'daily_return', 'volume_change',
-        'price_diff', 'rolling_max', 'rolling_min'
-    ]
-    df = df.dropna(subset=features + ['target'])
-
-    # === 4. Preprocesamiento ===
-    X = df[features].values
-    y = df['target'].values
-    scaler = MinMaxScaler()
-    X_scaled = scaler.fit_transform(X)
-
-    def create_sequences(X, y, window_size):
-        X_seq, y_seq = [], []
-        for i in range(window_size, len(X)):
-            X_seq.append(X[i - window_size:i])
-            y_seq.append(y[i])
-        return np.array(X_seq), np.array(y_seq)
-
-    def build_model(hp):
-        model = Sequential()
-        model.add(LSTM(
-            units=hp.Int("units", 32, 128, step=32),
-            input_shape=(X_train.shape[1], X_train.shape[2])
-        ))
-        model.add(Dropout(hp.Float("dropout", 0.1, 0.5, step=0.1)))
-        model.add(Dense(1, activation="sigmoid"))
-        model.compile(
-            loss="binary_crossentropy",
-            optimizer=Adam(learning_rate=hp.Float("lr", 1e-4, 1e-2, sampling="log")),
-            metrics=["accuracy"]
-        )
-        return model
-
-    # === 5. Crear secuencias ===
-    window_size = 5
-    global X_train  # necesario para tuner
-    X_seq, y_seq = create_sequences(X_scaled, y, window_size=window_size)
-    split = int(len(X_seq) * 0.8)
-    X_train, X_test = X_seq[:split], X_seq[split:]
-    y_train, y_test = y_seq[:split], y_seq[split:]
-
-    # === 6. Ver distribución ===
-    unique, counts = np.unique(y_train, return_counts=True)
-    print("📊 Distribución de clases en entrenamiento:")
-    print(dict(zip(unique, counts)))
-
-    # === 7. Tuning de hiperparámetros ===
-    tuner = kt.RandomSearch(
-        build_model,
-        objective="val_accuracy",
-        max_trials=10,
-        executions_per_trial=1,
-        directory="tuner_dir",
-        project_name="lstm_opt"
-    )
-
-    tuner.search(X_train, y_train, epochs=30, batch_size=32,
-                 validation_data=(X_test, y_test),
-                 callbacks=[EarlyStopping(monitor='val_loss', patience=5)],
-                 verbose=0)
-
-    best_hp = tuner.get_best_hyperparameters(1)[0]
-    print(f"✅ Mejores hiperparámetros: {best_hp.values}")
-
-    # === 8. Pesos de clase ===
-    weights = compute_class_weight(class_weight='balanced', classes=np.unique(y_train), y=y_train)
-    class_weights = dict(zip(np.unique(y_train), weights))
-    print(f"📊 Pesos aplicados: {class_weights}")
-
-    # === 9. Entrenamiento final ===
-    final_model = build_model(best_hp)
-    early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-    final_model.fit(X_train, y_train, epochs=50, batch_size=32,
-                    validation_data=(X_test, y_test),
-                    class_weight=class_weights,
-                    callbacks=[early_stop],
-                    verbose=0)
-
-    # === 10. Predicciones ===
-    y_pred_proba = final_model.predict(X_test)
-    y_pred = (y_pred_proba > 0.5).astype(int).flatten()
-
-    print("\n📊 Clasificación en test:")
-    print(classification_report(y_test, y_pred))
-
-    unique_pred, counts_pred = np.unique(y_pred, return_counts=True)
-    print(f"🔍 Distribución de predicciones: {dict(zip(unique_pred, counts_pred))}")
-
-    # === 11. Resultado final ===
-    df_result = df.iloc[window_size + split:].copy()
-    df_result['prediction'] = y_pred
-    df_result['resultado_final'] = df_result['prediction'].replace({1: 1, 0: -1})
-
-    return df_result
-
-def analisis_lstm_multiclase(df):
+def analisis_lstm_multiclase(df, features):
 
     # === 4. Escalado y creación de secuencias ===
     X = df[features].values
@@ -284,311 +147,190 @@ def analisis_lstm_multiclase(df):
     return df_result
 
 
-def analisis_xgb_multiclase_old(df):
-    """
-    Entrena un XGBoostClassifier para predecir señales -1/0/1 a partir de indicadores técnicos
-    y devuelve un DataFrame con las predicciones sobre la partición de test.
+# def analisis_xgb_multiclase_old(df):
+#     """
+#     Entrena un XGBoostClassifier para predecir señales -1/0/1 a partir de indicadores técnicos
+#     y devuelve un DataFrame con las predicciones sobre la partición de test.
 
-    Parámetros
-    ----------
-    df : pd.DataFrame
-        Debe contener al menos ['close', 'high', 'low', 'volume'] y los indicadores técnicos
-        mencionados en `features`. Si no los tienes, añádelos antes de llamar a la función.
+#     Parámetros
+#     ----------
+#     df : pd.DataFrame
+#         Debe contener al menos ['close', 'high', 'low', 'volume'] y los indicadores técnicos
+#         mencionados en `features`. Si no los tienes, añádelos antes de llamar a la función.
 
-    Devuelve
-    --------
-    df_result : pd.DataFrame
-        Filas del conjunto de test con la predicción (`prediction`) y la columna `resultado_final`
-        (‑1, 0 o 1).
-    """
-    # ------------------------------------------------------------------
-    # 1. Crear la etiqueta multiclase
-    # ------------------------------------------------------------------
-    import numpy as np
-    import pandas as pd
-    from sklearn.metrics import classification_report, confusion_matrix
-    from sklearn.utils.class_weight import compute_class_weight
-    from xgboost import XGBClassifier
+#     Devuelve
+#     --------
+#     df_result : pd.DataFrame
+#         Filas del conjunto de test con la predicción (`prediction`) y la columna `resultado_final`
+#         (‑1, 0 o 1).
+#     """
 
-    n_days = 3
-    threshold = 0.003
-    future_return = df['close'].shift(-n_days) / df['close'] - 1
+#     df, features = transformar_datos(df)
 
-    df['target'] = np.where(
-        future_return > threshold,  1,
-        np.where(future_return < -threshold, -1, 0)
-    )
 
-    # ------------------------------------------------------------------
-    # 2. Variables adicionales (si aún no las tienes en tu DataFrame)
-    # ------------------------------------------------------------------
-    df['daily_return']  = df['close'].pct_change()
-    df['volume_change'] = df['volume'].pct_change()
-    df['price_diff']    = df['high'] - df['low']
-    df['rolling_max']   = df['close'].rolling(5).max()
-    df['rolling_min']   = df['close'].rolling(5).min()
+#     # corr_matrix = df[features].corr().abs()
 
-    # ------------------------------------------------------------------
-    # 3. Lista de features
-    # ------------------------------------------------------------------
-    features = [
-        # Medias Móviles Simples (SMA)
-        'SMA_5', 'SMA_10', 'SMA_20',
-        
-        # Medias Móviles Exponenciales (EMA)
-        'EMA_5', 'EMA_10', 'EMA_20',
-        
-        # Indicadores de momentum y tendencia
-        'RSI',
-        'MACD', 'MACD_signal',
-        'momentum_5', 'momentum_10',
-        'stoch_k', 'stoch_d',
-        'ADX_14',
-        'CCI_20',
-        
-        # Indicadores de volatilidad
-        'volatility_5', 'volatility_10',
-        'ATR_14',
-        'bb_bbm', 'bb_bbh', 'bb_bbl', 'bb_bandwidth',
-        
-        # Retornos y variaciones
-        'retorno',
-        'daily_return',
-        'price_diff',
-        'gap',
-        
-        # Volumen
-        'volume',
-        'volume_change',
-        'OBV',
-        
-        # Precios extremos y rangos
-        'rolling_max_10', 'rolling_min_10',
-        
-        # VIX como indicador externo
-        'vix_close', 'vix_change_1d',
-        
-        # Características temporales
-        'day_of_week', 'month', 'quarter',
-        
-        # Otros
-        'up_down'
-    ]
+#     # plt.figure(figsize=(12,10))
+#     # sns.heatmap(corr_matrix, annot=False, cmap='coolwarm')
+#     # plt.title('Matriz de correlación entre features')
+#     # plt.show()
 
-    df = df.dropna(subset=features + ['target'])  # fuera nulos
+#     # 2. Eliminar features muy correlacionadas (> 0.9)
+#     # upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+#     # to_drop = [column for column in upper.columns if any(upper[column] > 0.9)]
+#     # print(f"Features a eliminar por alta correlación: {to_drop}")
 
-    # corr_matrix = df[features].corr().abs()
+#     # features = [f for f in features if f not in to_drop]
+#     # ------------------------------------------------------------------
+#     # 4. Preparar X, y y división temporal 80 / 20
+#     # ------------------------------------------------------------------
+#     X = df[features].values
 
-    # plt.figure(figsize=(12,10))
-    # sns.heatmap(corr_matrix, annot=False, cmap='coolwarm')
-    # plt.title('Matriz de correlación entre features')
-    # plt.show()
+#     # Mapear (-1,0,1) → (0,1,2) porque XGBoost requiere enteros consecutivos desde 0
+#     label_map = {-1: 0, 0: 1, 1: 2}
+#     y = df['target'].map(label_map).values
 
-    # 2. Eliminar features muy correlacionadas (> 0.9)
-    # upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
-    # to_drop = [column for column in upper.columns if any(upper[column] > 0.9)]
-    # print(f"Features a eliminar por alta correlación: {to_drop}")
+#     split_idx = int(len(df) * 0.8)
+#     X_train, X_test = X[:split_idx], X[split_idx:]
+#     y_train, y_test = y[:split_idx], y[split_idx:]
 
-    # features = [f for f in features if f not in to_drop]
-    # ------------------------------------------------------------------
-    # 4. Preparar X, y y división temporal 80 / 20
-    # ------------------------------------------------------------------
-    X = df[features].values
+#     # ------------------------------------------------------------------
+#     # 5. Compensar el desbalance de clases con pesos por muestra
+#     # ------------------------------------------------------------------
+#     class_weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
+#     cw_dict = {cls: w for cls, w in zip(np.unique(y_train), class_weights)}
+#     sample_weight_train = np.vectorize(cw_dict.get)(y_train)
 
-    # Mapear (-1,0,1) → (0,1,2) porque XGBoost requiere enteros consecutivos desde 0
-    label_map = {-1: 0, 0: 1, 1: 2}
-    y = df['target'].map(label_map).values
+#     # ------------------------------------------------------------------
+#     # 6. Definir y entrenar el modelo
+#     #    (hiperparámetros razonables; ajusta si quieres con Grid/Random Search)
+#     # ------------------------------------------------------------------
+#     model = XGBClassifier(
+#         n_estimators=200,
+#         learning_rate=0.1,
+#         max_depth=4,
+#         subsample=0.8,
+#         colsample_bytree=0.8,
+#         objective='multi:softprob',   # salida de probabilidades
+#         num_class=3,
+#         eval_metric='mlogloss',
+#         random_state=42,
+#         verbosity=0
+#     )
 
-    split_idx = int(len(df) * 0.8)
-    X_train, X_test = X[:split_idx], X[split_idx:]
-    y_train, y_test = y[:split_idx], y[split_idx:]
+#     model.fit(X_train, y_train, sample_weight=sample_weight_train)
 
-    # ------------------------------------------------------------------
-    # 5. Compensar el desbalance de clases con pesos por muestra
-    # ------------------------------------------------------------------
-    class_weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
-    cw_dict = {cls: w for cls, w in zip(np.unique(y_train), class_weights)}
-    sample_weight_train = np.vectorize(cw_dict.get)(y_train)
+#     # ------------------------------------------------------------------
+#     # 7. Evaluación clásica + reporte
+#     # ------------------------------------------------------------------
+#     y_pred = model.predict(X_test)
+#     inv_label_map = {v: k for k, v in label_map.items()}
 
-    # ------------------------------------------------------------------
-    # 6. Definir y entrenar el modelo
-    #    (hiperparámetros razonables; ajusta si quieres con Grid/Random Search)
-    # ------------------------------------------------------------------
-    model = XGBClassifier(
-        n_estimators=200,
-        learning_rate=0.1,
-        max_depth=4,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        objective='multi:softprob',   # salida de probabilidades
-        num_class=3,
-        eval_metric='mlogloss',
-        random_state=42,
-        verbosity=0
-    )
+#     print("\n📊 Clasificación en test:")
+#     print(classification_report(y_test,
+#                                 y_pred,
+#                                 target_names=['Vender (-1)', 'Nada (0)', 'Comprar (1)']))
 
-    model.fit(X_train, y_train, sample_weight=sample_weight_train)
+#     # ------------------------------------------------------------------
+#     # 8. Reconstruir DataFrame con resultados
+#     # ------------------------------------------------------------------
+#     df_result = df.iloc[split_idx:].copy()
+#     df_result['prediction']     = [inv_label_map[i] for i in y_pred]
+#     df_result['resultado_final'] = df_result['prediction']   # por si acaso
 
-    # ------------------------------------------------------------------
-    # 7. Evaluación clásica + reporte
-    # ------------------------------------------------------------------
-    y_pred = model.predict(X_test)
-    inv_label_map = {v: k for k, v in label_map.items()}
+#     return df_result
 
-    print("\n📊 Clasificación en test:")
-    print(classification_report(y_test,
-                                y_pred,
-                                target_names=['Vender (-1)', 'Nada (0)', 'Comprar (1)']))
+# def analisis_xgb_multiclase(df):
+#     """
+#     Entrena un XGBoostClassifier para predecir señales -1/0/1 a partir de indicadores técnicos
+#     y devuelve un DataFrame con las predicciones sobre la partición de test.
+#     Además entrena un LogisticRegression con regularización L1 para analizar importancia de features.
 
-    # ------------------------------------------------------------------
-    # 8. Reconstruir DataFrame con resultados
-    # ------------------------------------------------------------------
-    df_result = df.iloc[split_idx:].copy()
-    df_result['prediction']     = [inv_label_map[i] for i in y_pred]
-    df_result['resultado_final'] = df_result['prediction']   # por si acaso
+#     Parámetros
+#     ----------
+#     df : pd.DataFrame
+#         Debe contener al menos ['close', 'high', 'low', 'volume'] y los indicadores técnicos
+#         mencionados en `features`.
 
-    return df_result
+#     Devuelve
+#     --------
+#     df_result : pd.DataFrame
+#         Filas del conjunto de test con la predicción (`prediction`) y la columna `resultado_final` (-1, 0 o 1).
+#     """
+    
+#     df, features = transformar_datos(df)
 
-def analisis_xgb_multiclase(df):
-    """
-    Entrena un XGBoostClassifier para predecir señales -1/0/1 a partir de indicadores técnicos
-    y devuelve un DataFrame con las predicciones sobre la partición de test.
-    Además entrena un LogisticRegression con regularización L1 para analizar importancia de features.
 
-    Parámetros
-    ----------
-    df : pd.DataFrame
-        Debe contener al menos ['close', 'high', 'low', 'volume'] y los indicadores técnicos
-        mencionados en `features`.
+#     # Preparamos X e y para XGBoost
+#     X = df[features].values
+#     label_map = {-1: 0, 0: 1, 1: 2}  # Mapear etiquetas
+#     y = df['target'].map(label_map).values
 
-    Devuelve
-    --------
-    df_result : pd.DataFrame
-        Filas del conjunto de test con la predicción (`prediction`) y la columna `resultado_final` (-1, 0 o 1).
-    """
-    import numpy as np
-    import pandas as pd
-    from sklearn.metrics import classification_report
-    from sklearn.utils.class_weight import compute_class_weight
-    from xgboost import XGBClassifier
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.model_selection import train_test_split
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.metrics import accuracy_score
+#     split_idx = int(len(df)*0.8)
+#     X_train, X_test = X[:split_idx], X[split_idx:]
+#     y_train, y_test = y[:split_idx], y[split_idx:]
 
-    n_days = 3
-    threshold = 0.003
-    future_return = df['close'].shift(-n_days) / df['close'] - 1
+#     # Pesos para balancear clases en XGBoost
+#     class_weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
+#     cw_dict = {cls: w for cls, w in zip(np.unique(y_train), class_weights)}
+#     sample_weight_train = np.vectorize(cw_dict.get)(y_train)
 
-    df['target'] = np.where(
-        future_return > threshold,  1,
-        np.where(future_return < -threshold, -1, 0)
-    )
+#     # --- Modelo XGBoost ---
+#     model = XGBClassifier(
+#         n_estimators=200,
+#         learning_rate=0.1,
+#         max_depth=4,
+#         subsample=0.8,
+#         colsample_bytree=0.8,
+#         objective='multi:softprob',
+#         num_class=3,
+#         eval_metric='mlogloss',
+#         random_state=42,
+#         verbosity=0
+#     )
+#     model.fit(X_train, y_train, sample_weight=sample_weight_train)
+#     y_pred = model.predict(X_test)
 
-    # Variables adicionales
-    df['daily_return']  = df['close'].pct_change()
-    df['volume_change'] = df['volume'].pct_change()
-    df['price_diff']    = df['high'] - df['low']
-    df['rolling_max_10']   = df['close'].rolling(10).max()
-    df['rolling_min_10']   = df['close'].rolling(10).min()
+#     inv_label_map = {v: k for k, v in label_map.items()}
 
-    features = [
-        'SMA_5', 'SMA_10', 'SMA_20',
-        'EMA_5', 'EMA_10', 'EMA_20',
-        'RSI',
-        'MACD', 'MACD_signal',
-        'momentum_5', 'momentum_10',
-        'stoch_k', 'stoch_d',
-        'ADX_14',
-        'CCI_20',
-        'volatility_5', 'volatility_10',
-        'ATR_14',
-        'bb_bbm', 'bb_bbh', 'bb_bbl', 'bb_bandwidth',
-        'retorno',
-        'daily_return',
-        'price_diff',
-        'gap',
-        'volume',
-        'volume_change',
-        'OBV',
-        'rolling_max_10', 'rolling_min_10',
-        'vix_close', 'vix_change_1d',
-        'day_of_week', 'month', 'quarter',
-        'up_down'
-    ]
+#     print("\n📊 Clasificación XGBoost en test:")
+#     print(classification_report(y_test,
+#                                 y_pred,
+#                                 target_names=['Vender (-1)', 'Nada (0)', 'Comprar (1)']))
 
-    df = df.dropna(subset=features + ['target'])
+#     # --- Modelo Logistic Regression con L1 (regularización) para análisis de features ---
+#     # Escalado necesario para modelos lineales
+#     scaler = StandardScaler()
+#     X_train_scaled = scaler.fit_transform(X[:split_idx])
+#     X_test_scaled = scaler.transform(X[split_idx:])
 
-    # Preparamos X e y para XGBoost
-    X = df[features].values
-    label_map = {-1: 0, 0: 1, 1: 2}  # Mapear etiquetas
-    y = df['target'].map(label_map).values
+#     lr = LogisticRegression(
+#         penalty='l1',
+#         solver='saga',
+#         max_iter=10000,
+#         random_state=42,
+#         multi_class='multinomial',
+#         C=1.0
+#     )
+#     lr.fit(X_train_scaled, y_train)
+#     y_pred_lr = lr.predict(X_test_scaled)
 
-    split_idx = int(len(df)*0.8)
-    X_train, X_test = X[:split_idx], X[split_idx:]
-    y_train, y_test = y[:split_idx], y[split_idx:]
+#     print("\n📊 Clasificación Logistic Regression L1 en test:")
+#     print(classification_report(y_test,
+#                                 y_pred_lr,
+#                                 target_names=['Vender (-1)', 'Nada (0)', 'Comprar (1)']))
 
-    # Pesos para balancear clases en XGBoost
-    class_weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
-    cw_dict = {cls: w for cls, w in zip(np.unique(y_train), class_weights)}
-    sample_weight_train = np.vectorize(cw_dict.get)(y_train)
+#     # Importancia según coeficientes (suma absoluta en multiclase)
+#     import numpy as np
+#     coef_importance = np.sum(np.abs(lr.coef_), axis=0)
+#     features_importance = sorted(zip(features, coef_importance), key=lambda x: x[1], reverse=True)
+#     print("\n🎯 Importancia de features según Logistic Regression L1:")
+#     for f, imp in features_importance:
+#         print(f"{f}: {imp:.4f}")
 
-    # --- Modelo XGBoost ---
-    model = XGBClassifier(
-        n_estimators=200,
-        learning_rate=0.1,
-        max_depth=4,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        objective='multi:softprob',
-        num_class=3,
-        eval_metric='mlogloss',
-        random_state=42,
-        verbosity=0
-    )
-    model.fit(X_train, y_train, sample_weight=sample_weight_train)
-    y_pred = model.predict(X_test)
+#     # Devolver resultados XGBoost para test
+#     df_result = df.iloc[split_idx:].copy()
+#     df_result['prediction'] = [inv_label_map[i] for i in y_pred]
+#     df_result['resultado_final'] = df_result['prediction']
 
-    inv_label_map = {v: k for k, v in label_map.items()}
-
-    print("\n📊 Clasificación XGBoost en test:")
-    print(classification_report(y_test,
-                                y_pred,
-                                target_names=['Vender (-1)', 'Nada (0)', 'Comprar (1)']))
-
-    # --- Modelo Logistic Regression con L1 (regularización) para análisis de features ---
-    # Escalado necesario para modelos lineales
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X[:split_idx])
-    X_test_scaled = scaler.transform(X[split_idx:])
-
-    lr = LogisticRegression(
-        penalty='l1',
-        solver='saga',
-        max_iter=10000,
-        random_state=42,
-        multi_class='multinomial',
-        C=1.0
-    )
-    lr.fit(X_train_scaled, y_train)
-    y_pred_lr = lr.predict(X_test_scaled)
-
-    print("\n📊 Clasificación Logistic Regression L1 en test:")
-    print(classification_report(y_test,
-                                y_pred_lr,
-                                target_names=['Vender (-1)', 'Nada (0)', 'Comprar (1)']))
-
-    # Importancia según coeficientes (suma absoluta en multiclase)
-    import numpy as np
-    coef_importance = np.sum(np.abs(lr.coef_), axis=0)
-    features_importance = sorted(zip(features, coef_importance), key=lambda x: x[1], reverse=True)
-    print("\n🎯 Importancia de features según Logistic Regression L1:")
-    for f, imp in features_importance:
-        print(f"{f}: {imp:.4f}")
-
-    # Devolver resultados XGBoost para test
-    df_result = df.iloc[split_idx:].copy()
-    df_result['prediction'] = [inv_label_map[i] for i in y_pred]
-    df_result['resultado_final'] = df_result['prediction']
-
-    return df_result
+#     return df_result

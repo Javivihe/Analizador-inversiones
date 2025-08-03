@@ -1,31 +1,16 @@
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
-from sklearn.metrics import classification_report
-from sklearn.utils.class_weight import compute_class_weight
-import keras_tuner as kt
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dropout, Dense
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.callbacks import EarlyStopping
-
-import matplotlib.pyplot as plt
-import pandas as pd
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 import ta
 
-from funciones_analisis import analisis_basico, analisis_random_forest, analisis_lstm, analisis_lstm_multiclase, analisis_xgb_multiclase
+from graficas import plot_signals
 
-import yfinance as yf
-import pandas as pd
-import ta  # Asegúrate de tener la librería instalada: pip install ta
+def plot_stock_and_return(flag, ticker, start_date, end_date=None, grafica=False, n_days=3, threshold=0.01):
 
-from funciones_utiles import plot_signals
+    from funciones_analisis import analisis_basico, analisis_random_forest, analisis_lstm, analisis_lstm_multiclase
 
-def plot_stock_and_return(flag, ticker, start_date, end_date=None, grafica=False):
     if end_date is None:
         end_date = pd.Timestamp.now()
     stock = yf.Ticker(ticker)
@@ -115,28 +100,6 @@ def plot_stock_and_return(flag, ticker, start_date, end_date=None, grafica=False
     df['month'] = pd.to_datetime(df.index).month
     df['quarter'] = pd.to_datetime(df.index).quarter
 
-    # Limpiar nans (por rolling windows)
-    df.dropna(inplace=True)
-    # Lógica que tenías para procesar segun flag (igual la mantengo)
-    if flag == 'analisis_basico':
-        df = analisis_basico(df)
-    elif flag == 'random_forest':
-        df = analisis_random_forest(df)
-    elif flag == 'lstm':
-        df = analisis_lstm(df)
-    elif flag == 'analisis_lstm_multiclase':
-        df = analisis_lstm_multiclase(df)
-    elif flag == 'analisis_xgb_multiclase':
-        df = analisis_xgb_multiclase(df)
-
-    if grafica:
-        plot_signals(df, ticker)
-
-    return df
-
-
-def transformar_datos(df, n_days=3, threshold=0.01):
-
     # === 1. Crear target multiclase: -1 (vender), 0 (nada), 1 (comprar) ===
     future_return = df['close'].shift(-n_days) / df['close'] - 1
     print(future_return)
@@ -200,3 +163,19 @@ def transformar_datos(df, n_days=3, threshold=0.01):
     ]
 
     df = df.dropna(subset=features + ['target'])  # fuera nulos
+    # Lógica que tenías para procesar segun flag (igual la mantengo)
+    if flag == 'analisis_basico':
+        df = analisis_basico(df)
+    elif flag == 'random_forest':
+        df = analisis_random_forest(df, features)
+    elif flag == 'lstm':
+        df = analisis_lstm(df,features)
+    elif flag == 'analisis_lstm_multiclase':
+        df = analisis_lstm_multiclase(df, features)
+    # elif flag == 'analisis_xgb_multiclase':
+    #     df = analisis_xgb_multiclase(df)
+
+    if grafica:
+        plot_signals(df, ticker)
+
+    return df

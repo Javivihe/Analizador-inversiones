@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import ta
 
-from funciones_utiles import estrategia
+from estrategia_backend import estrategia
 
 
 
@@ -30,4 +30,4 @@ RED = [
     "NVDA", "RR.L"
 ]
 
-estrategia(TICKERS_RED, ['analisis_lstm_multiclase'], '2020-01-01', False)
+estrategia(RED, ['analisis_lstm_multiclase'], '2020-01-01', False)
