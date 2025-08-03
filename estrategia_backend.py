@@ -49,7 +49,7 @@ def backtest_strategy(df):
     return final_value_roi, buy_hold_return
 
 
-def estrategia(TICKERS, flags, init_day, param_grafica):
+def estrategia(TICKERS, flags, init_day, param_grafica, comparar_features, n_days, threshold):
     """
     Ejecuta la estrategia para una lista de tickers y flags.
     Args:
@@ -58,13 +58,15 @@ def estrategia(TICKERS, flags, init_day, param_grafica):
     """
     arr_estrategia = []
     arr_mantener = []
+    arr_ganadoras = []
+    
     for flag in flags:
         cont_estrategia = 0
         cont_total = 0
         print(f"Evaluando estrategia con flag: {flag}")
         for i in TICKERS:
             print(f"Procesando {i}...")
-            df = plot_stock_and_return(flag, i, init_day, grafica=param_grafica)
+            df = plot_stock_and_return(flag, i, init_day, n_days=n_days, threshold=threshold, grafica=param_grafica, comparar_features=comparar_features)
             final_value_roi, buy_hold_return = backtest_strategy(df)
             arr_estrategia.append(final_value_roi)
             arr_mantener.append(buy_hold_return)
@@ -72,6 +74,7 @@ def estrategia(TICKERS, flags, init_day, param_grafica):
             print(f"Estrategia de mantener: ROI = {buy_hold_return:.2f}%")
             if (final_value_roi > buy_hold_return):
                 cont_estrategia += 1
+                arr_ganadoras.append(i)
             cont_total += 1
         print(f"Total de acciones analizadas: {cont_total}")
         print(f"Acciones con mejor ROI que estrategia de mantener: {cont_estrategia}")
@@ -79,3 +82,5 @@ def estrategia(TICKERS, flags, init_day, param_grafica):
         print("Resultados finales:")
         print(f"ROI estrategia: {np.mean(arr_estrategia):.2f}%")
         print(f"ROI estrategia de mantener: {np.mean(arr_mantener):.2f}%")      
+        print(f"Acciones ganadoras: {arr_ganadoras}")
+    return np.mean(arr_estrategia)

@@ -7,9 +7,10 @@ import ta
 
 from graficas import plot_signals
 
-def plot_stock_and_return(flag, ticker, start_date, end_date=None, grafica=False, n_days=3, threshold=0.01):
+def plot_stock_and_return(flag, ticker, start_date, n_days, threshold, end_date=None, grafica=False, comparar_features = False):
+    
 
-    from funciones_analisis import analisis_basico, analisis_random_forest, analisis_lstm, analisis_lstm_multiclase
+    from funciones_analisis import analisis_basico, analisis_random_forest, analisis_lstm_multiclase
 
     if end_date is None:
         end_date = pd.Timestamp.now()
@@ -161,17 +162,28 @@ def plot_stock_and_return(flag, ticker, start_date, end_date=None, grafica=False
         # Otros
         'up_down'
     ]
-
-    df = df.dropna(subset=features + ['target'])  # fuera nulos
+    features_reducidas = [
+        'price_diff',
+        'retorno',
+        'bb_bbm',
+        'EMA_10',
+        'volume_change',
+        'EMA_20',
+        'daily_return',
+        'SMA_10',
+        'stoch_k'
+        ]
+    df = df.dropna(subset=features_reducidas + ['target'])  # fuera nulos
+    df.replace([np.inf, -np.inf], np.nan, inplace=True)
+    df.fillna(method='ffill', inplace=True)
+    df.dropna(inplace=True)
     # Lógica que tenías para procesar segun flag (igual la mantengo)
     if flag == 'analisis_basico':
         df = analisis_basico(df)
     elif flag == 'random_forest':
         df = analisis_random_forest(df, features)
-    elif flag == 'lstm':
-        df = analisis_lstm(df,features)
     elif flag == 'analisis_lstm_multiclase':
-        df = analisis_lstm_multiclase(df, features)
+        df = analisis_lstm_multiclase(df, features, comparar_features)
     # elif flag == 'analisis_xgb_multiclase':
     #     df = analisis_xgb_multiclase(df)
 

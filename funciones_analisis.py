@@ -11,12 +11,11 @@ import keras_tuner as kt
 from tensorflow.keras.callbacks import EarlyStopping
 import matplotlib.pyplot as plt
 import seaborn as sns
-from transformar_datos import transformar_datos
 from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
 from sklearn.metrics import classification_report
 from sklearn.utils.class_weight import compute_class_weight
 import keras_tuner as kt
-
+from comparar_features import importancia_features_lstm
 def analisis_basico(df):
     """
     Aplica señales técnicas básicas (SMA, RSI, MACD) y genera la columna resultado_final.
@@ -56,13 +55,16 @@ def analisis_random_forest(df, features):
     df['resultado_final'] = df['prediction'].replace({1: 1, 0: -1})
     return df
 
-def analisis_lstm_multiclase(df, features):
+def analisis_lstm_multiclase(df, features, comparar_features):
+
 
     # === 4. Escalado y creación de secuencias ===
     X = df[features].values
     y_raw = df['target'].values.reshape(-1, 1)
     print(df[features])
     scaler = MinMaxScaler()
+
+    print(X)
     X_scaled = scaler.fit_transform(X)
     print(X_scaled)
     encoder = OneHotEncoder(sparse=False, categories='auto')
@@ -129,6 +131,20 @@ def analisis_lstm_multiclase(df, features):
                     class_weight=class_weights,
                     callbacks=[EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)],
                     verbose=0)
+
+    if (comparar_features):
+        print("\n📊 Comparando Features...:")
+        resultados = importancia_features_lstm(
+            df=df,
+            features=features,
+            window_size=20,
+            metric='accuracy',
+            build_model_fn=build_model,
+            hp=best_hp,
+            verbose=1
+        )
+
+        print(resultados)
 
     # === 7. Evaluación y predicción ===
     y_pred_probs = final_model.predict(X_test)

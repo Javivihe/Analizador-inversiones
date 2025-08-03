@@ -5,7 +5,29 @@ import matplotlib.pyplot as plt
 import ta
 
 from estrategia_backend import estrategia
+import optuna
 
+
+def objective(trial):
+    # Buscar n_days entre 1 y 10 (enteros)
+    n_days = trial.suggest_int("n_days", 1, 10)
+
+    # Buscar threshold entre 0.01 y 0.2 (floats)
+    threshold = trial.suggest_float("threshold", 0.03, 0.05)
+    print(f"Probando n_days={n_days}, threshold={threshold}")
+    # Ejecutar la función que quieres maximizar
+    resultado = estrategia(
+        SP500,
+        ['analisis_lstm_multiclase'],
+        '2020-01-01',
+        param_grafica=False,        # ⚠️ Desactivamos gráficos para más velocidad
+        comparar_features=False,
+        n_days=n_days,
+        threshold=threshold
+    )
+
+    # Devolver el valor que queremos maximizar
+    return resultado  # ⬅️ Asegúrate de que esto sea escalar y representativo (por ejemplo accuracy o sharpe)
 
 
 
@@ -29,5 +51,25 @@ TICKERS_RED = [
 RED = [
     "NVDA", "RR.L"
 ]
+GANADORAS = ['AAPL', 'AMZN', 'O', 'AMD', 'PEP', 'SBUX']
+SP500 = ['VUSA.DE']
 
-estrategia(RED, ['analisis_lstm_multiclase'], '2020-01-01', False)
+
+# # Crear y ejecutar el estudio
+# study = optuna.create_study(direction="maximize")
+# study.optimize(objective, n_trials=30)  # Cambia a más si necesitas más precisión
+
+# # Mostrar resultados
+# print("🎯 Mejor valor:", study.best_value)
+# print("📈 Mejores parámetros:", study.best_params)
+
+
+estrategia(
+        SP500,
+        ['analisis_lstm_multiclase'],
+        '2020-01-01',
+        param_grafica=False,        # ⚠️ Desactivamos gráficos para más velocidad
+        comparar_features=False,
+        n_days=6,
+        threshold=0.04049634189642107
+)
